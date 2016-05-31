@@ -69,6 +69,8 @@ struct Entry{
 int fd_ls(int detail, struct Entry * curdir);
 int fd_df(struct Entry * where, int addr, int size, int mode);
 int fd_cf(int size, int mode);
+int fd_rd(struct Entry * en, unsigned char * str, int st, int len);
+int fd_ef(struct Entry * en, char * str, int mode, int len);
 
 void findDate(unsigned short *year,
 			unsigned short *month,

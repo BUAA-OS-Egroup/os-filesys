@@ -510,7 +510,7 @@ int getfPath(struct Entry * en, char *dir, int mode)
 			else ret = ScanEntryIn(t,pentry,1,tentry);
 			if(ret < 0)
 			{
-				if (dir[i]=='\0'||mode==1&&dir[i]=='/'&&dir[i+1]=='\0') 
+				if (dir[i]=='\0'||(mode&1)&&dir[i]=='/'&&dir[i+1]=='\0') 
 				{
 					if (tentry==NULL)
 					{
@@ -766,30 +766,10 @@ unsigned short getEmptyCluster(int clustersize)
 		return clusterno[0];
 }
 
-
-int findAndWrite(int size,int mode, int fc, int newFC)
-{
-	char * filename=tentry->short_name;
-	int ret,i=0,cluster_addr,offset, date, hms;
-	unsigned char c[DIR_ENTRY_SIZE];
+int justWrite(unsigned char * c, int fc) {
+	int ret,i=0,cluster_addr,offset;
 	int index,clustersize,tmp, curClu;
 	unsigned char buf[DIR_ENTRY_SIZE];
-	time_t now;
-	struct tm *timenow;
-	time(&now);
-	timenow=localtime(&now);
-	//printf("%d\n", timenow->tm_wday);
-	date = ((timenow->tm_year - 80)<<9) | ((timenow->tm_mon+1)<<5) | timenow->tm_mday;
-	hms = ((timenow->tm_hour)<<11) | (timenow->tm_min<<5) | (timenow->tm_sec>>1);
-
-	if (newFC<0)
-	{
-		clustersize = (size / (CLUSTER_SIZE));
-		if (size==0||size % (CLUSTER_SIZE) != 0) ++clustersize;
-
-		index=getEmptyCluster(clustersize);
-	}
-	else index=newFC;
 	if (fc==1)
 	{
 			if((ret= lseek(fd,ROOTDIR_OFFSET,SEEK_SET))<0)
@@ -817,42 +797,18 @@ int findAndWrite(int size,int mode, int fc, int newFC)
 				else
 				{
 					offset = offset-abs(ret);     
-					for(i=0;i<=strlen(filename);i++)
-					{
-						c[i]=toupper(filename[i]);
-					}			
-					for(;i<=10;i++)
-						c[i]=' ';
 
-					if (mode) c[11] = 0x10; else c[11] = 0x00;
-
-					c[24] = date&0xFF;
-					c[25] = date>>8;
-					c[22] = hms&0xFF;
-					c[23] = hms>>8;
-
-					/*写第一簇的值*/
-					c[26] = (index &  0x00ff);
-					c[27] = ((index & 0xff00)>>8);
-
-					/*写文件的大小*/
-					c[28] = (size &  0x000000ff);
-					c[29] = ((size & 0x0000ff00)>>8);
-					c[30] = ((size& 0x00ff0000)>>16);
-					c[31] = ((size& 0xff000000)>>24);
 
 					if(lseek(fd,offset,SEEK_SET)<0)
 						perror("lseek fd_cf failed");
-					if(write(fd,&c,DIR_ENTRY_SIZE)<0)
+					if(write(fd,c,DIR_ENTRY_SIZE)<0)
 						perror("write failed");
-
-
 
 
 					if(WriteFat()<0)
 						exit(1);
 
-					return index;
+					return 0;
 				}
 
 			}
@@ -887,37 +843,16 @@ int findAndWrite(int size,int mode, int fc, int newFC)
 				else
 				{ 
 					offset = offset - abs(ret);      
-					for(i=0;i<=strlen(filename);i++)
-					{
-						c[i]=toupper(filename[i]);
-					}
-					for(;i<=10;i++)
-						c[i]=' ';
-
-					if (mode) c[11] = 0x10; else c[11]=0x00;
-
-					c[24] = date&0xFF;
-					c[25] = date>>8;
-					c[22] = hms&0xFF;
-					c[23] = hms>>8;
-
-					c[26] = (index &  0x00ff);
-					c[27] = ((index & 0xff00)>>8);
-
-					c[28] = (size &  0x000000ff);
-					c[29] = ((size & 0x0000ff00)>>8);
-					c[30] = ((size& 0x00ff0000)>>16);
-					c[31] = ((size& 0xff000000)>>24);
 
 					if(lseek(fd,offset,SEEK_SET)<0)
 						perror("lseek fd_cf failed");
-					if(write(fd,&c,DIR_ENTRY_SIZE)<0)
+					if(write(fd,c,DIR_ENTRY_SIZE)<0)
 						perror("write failed");
 
 					if(WriteFat()<0)
 						exit(1);
 
-					return index;
+					return 0;
 				}
 
 
@@ -938,7 +873,56 @@ int findAndWrite(int size,int mode, int fc, int newFC)
 		}
 	}
 
-	return 0;
+	return 0;	
+}
+
+
+int findAndWrite(int size,int mode, int fc, int newFC)
+{
+	char * filename=tentry->short_name;
+	unsigned char c[DIR_ENTRY_SIZE];
+	int index,clustersize,tmp, curClu, date, hms,i;
+	time_t now;
+	struct tm *timenow;
+	time(&now);
+	timenow=localtime(&now);
+	//printf("%d\n", timenow->tm_wday);
+	date = ((timenow->tm_year - 80)<<9) | ((timenow->tm_mon+1)<<5) | timenow->tm_mday;
+	hms = ((timenow->tm_hour)<<11) | (timenow->tm_min<<5) | (timenow->tm_sec>>1);
+	if (newFC<0)
+	{
+		clustersize = (size / (CLUSTER_SIZE));
+		if (size==0||size % (CLUSTER_SIZE) != 0) ++clustersize;
+
+		index=getEmptyCluster(clustersize);
+	}
+	else index=newFC;
+
+		for(i=0;i<strlen(filename);i++)
+		{
+			c[i]=toupper(filename[i]);
+		}			
+		for(;i<=10;i++)
+			c[i]=' ';
+
+		if (mode) c[11] = 0x10; else c[11] = 0x00;
+
+		c[24] = date&0xFF;
+		c[25] = date>>8;
+		c[22] = hms&0xFF;
+		c[23] = hms>>8;
+
+		/*写第一簇的值*/
+		c[26] = (index &  0x00ff);
+		c[27] = ((index & 0xff00)>>8);
+
+		/*写文件的大小*/
+		c[28] = (size &  0x000000ff);
+		c[29] = ((size & 0x0000ff00)>>8);
+		c[30] = ((size& 0x00ff0000)>>16);
+		c[31] = ((size& 0xff000000)>>24);
+	justWrite(c,fc);
+	return index;
 }
 
 int giveAndWrite(int size,int mode, int fc)
@@ -995,10 +979,11 @@ int fd_cf(int size, int mode)
 	return -1;
 }
 
-int fd_ef(struct Entry * en, char * str, int mode)
+int fd_ef(struct Entry * en, char * str, int mode, int len)
 {
 	unsigned int n,zero=0x00000000,cnt,k,i,tmp;
 	unsigned char c=0x00;
+	unsigned char *tmps;
 	if (en->FirstCluster==1||en->subdir==1||en->short_name[0]=='\0') 
 	{
 		printf("cw: Invalid target.\n");
@@ -1050,7 +1035,7 @@ int fd_ef(struct Entry * en, char * str, int mode)
 		if (cnt*CLUSTER_SIZE<en->size) {
 			en->size=cnt*CLUSTER_SIZE;
 		}
-		cnt=strlen(str);
+		cnt=len;
 		k=en->size;
 		for (n=en->FirstCluster;fatbuf[n<<1]+(fatbuf[(n<<1)+1]<<8)!=0xffff&&k>=CLUSTER_SIZE;n=fatbuf[n<<1]+(fatbuf[(n<<1)+1]<<8),k-=CLUSTER_SIZE);
 		tmp=DATA_OFFSET + (n-2) * CLUSTER_SIZE + k;
@@ -1091,16 +1076,138 @@ int fd_ef(struct Entry * en, char * str, int mode)
 	}
 	else if (mode==2)
 	{
-		printf("this module is coding...\n");
+		if((n = open(str,O_RDONLY))<0) {
+			printf("open file %s error.\n",str);
+			perror("open failed");
+			return -1;
+		}
+		tmps=(unsigned char *)malloc(1024);
+		i=0;
+		while ((cnt=read(n,tmps,1024))>0) {
+			if (i==0) fd_ef(en,tmps,0,cnt);
+			else fd_ef(en,tmps,1,cnt);
+			i+=cnt;
+		}
+		close(n);
+		free(tmps);
+		printf("%d bytes are written.\n", i);
+	}
+	else if (mode==3)
+	{
+		if((n = open(str,O_WRONLY|O_CREAT))<0) {
+			printf("open file %s error.\n",str);
+			perror("open failed");
+			return -1;
+		}		
+		tmps=(unsigned char *)malloc(1024);
+		i=0;
+		k=en->size;
+		while (k) {
+			cnt=k<1024?k:1024;
+			if ((cnt=fd_rd(en,tmps,i,cnt))<0) 
+			{
+				printf("read file error.\n");
+				return -1;
+			}
+			i+=cnt;
+			k-=cnt;
+			if (write(n,tmps,cnt)<0) 
+			{
+				printf("write file error.\n");
+				return -1;
+			}
+		}
+		close(n);
+		free(tmps);
+		printf("%d bytes are written.\n", i);
 	}
 	if(WriteFat()<0)
 		exit(1);
 	return 1;
 }
 
+int fd_rd(struct Entry * en, unsigned char * str, int st, int len) {
+	unsigned int offset,cluster_addr,cnt,k,i,curClu,ret;
+	unsigned char c=0x00;
+	if (en->FirstCluster==1||en->subdir==1||en->short_name[0]=='\0') 
+	{
+		printf("rd: Invalid target.\n");
+		return -1;
+	}
+	curClu=en->FirstCluster;
+	i=0;
+	while (st>=CLUSTER_SIZE) {
+		st-=CLUSTER_SIZE;
+		curClu=fatbuf[curClu<<1]+(fatbuf[(curClu<<1)+1]<<8);
+		if (curClu==0xffff) {
+			printf("rd: invalid offset.\n");;
+			return -1;
+		}
+	}
+		while (len) {
+			cluster_addr = DATA_OFFSET + (curClu-2) * CLUSTER_SIZE ;
+			if (st) cluster_addr+=st, st=0;
+			if((ret = lseek(fd,cluster_addr,SEEK_SET))<0)
+				perror("lseek cluster_addr failed");
+
+			offset = cluster_addr;
+
+			/*只读一簇的内容*/
+				if (len>=cluster_addr +CLUSTER_SIZE - offset) {
+					if (read(fd,str+i,cluster_addr +CLUSTER_SIZE - offset)<0) {
+						return -1;
+					}
+					len-=cluster_addr +CLUSTER_SIZE - offset;
+					i+=cluster_addr +CLUSTER_SIZE - offset;
+				}
+				else {
+					if (read(fd,str+i,len)<0) return -1;
+					i+=len;
+					len=0;
+					break;
+				}
+
+			curClu=fatbuf[curClu<<1]+(fatbuf[(curClu<<1)+1]<<8);
+			if (curClu==0xffff) break;
+		}	
+	return i;
+}
+
+int cpENTRY(unsigned char * d, int mode) {
+	int size=tmpsize, addr=tmpaddr,k;
+	unsigned char c=0xe5;
+	if(lseek(fd,tmpaddr,SEEK_SET)<0)
+		perror("lseek fd_df failed");
+	if (mode==0) return read(fd,d,tmpsize);
+	if (mode==1) {
+		k=read(fd,d,tmpsize);
+		size+=addr;
+		for (;addr<size;addr+=DIR_ENTRY_SIZE)
+		{
+			if(lseek(fd,addr,SEEK_SET)<0)
+				perror("lseek fd_df failed");
+			if(write(fd,&c,1)<0)
+				perror("write failed");
+		}
+		return k;
+	}
+	return -1;
+}
+
+void changeName(unsigned char * c) {
+	int i;
+	char * filename=tentry->short_name;
+	for(i=0;i<strlen(filename);i++)
+	{
+		c[i]=toupper(filename[i]);
+	}			
+	for(;i<=10;i++)
+		c[i]=' ';
+}
+
 void do_usage()
 {
-	printf("please input a command, including followings:\n\tls [-l] [path]\t\t\tlist all files\n\tcd <dir>\t\t\tchange direcotry\n\ttouch <filename>\t\tcreate a empty file\n\tmkdir <dirname>\t\t\tcreate a empty dir\n\trm [-r] <file>\t\t\tdelete a file or direcotry\n\tcw [words|-a words|-f file] <file>\tedit or copy a file\n\texit\t\t\t\texit this system\n");
+	printf("please input a command, including followings:\n\tls [-l] [path]\t\t\tlist all files\n\tcd <dir>\t\t\tchange direcotry\n\ttouch <filename>\t\tcreate a empty file\n\tmkdir <dirname>\t\t\tcreate a empty dir\n\trm [-r] <file>\t\t\tdelete a file or direcotry\n\tcw [words|-a words|-f external_file|-e external_file] <file>\tedit or copy a file\n\texit\t\t\t\texit this system\n");
 }
 
 int getCMD(char * cmd, char *op)
@@ -1139,7 +1246,8 @@ int main()
 {
 	char input[10];
 	char op[512];
-	int size=0,cnt;
+	char tmp[1024];
+	int size=0,cnt,oa,ob,offset;
 	if((fd = open(DEVNAME,O_RDWR))<0)
 		perror("open failed");
 	ScanBootSector();
@@ -1229,18 +1337,23 @@ int main()
 			if (cnt==3)
 			{
 				getPath(path,op+128,0);
-				fd_ef(path,op,0);
+				fd_ef(path,op,0,strlen(op));
 			}
 			if (cnt==4) {
 				if (strcmp(op,"-a")==0)
 				{
 					getPath(path,op+256,0);
-					fd_ef(path,op+128,1);
+					fd_ef(path,op+128,1,strlen(op+128));
 				}
 				else if (strcmp(op,"-f")==0)
 				{
 					getPath(path,op+256,0);
-					fd_ef(path,op+128,2);
+					fd_ef(path,op+128,2,0);
+				}
+				else if (strcmp(op,"-e")==0)
+				{
+					getPath(path,op+256,0);
+					fd_ef(path,op+128,3,0);
 				}
 				else printf("cw: invalid sentence\n");
 			}
@@ -1255,8 +1368,47 @@ int main()
 			getfPath(path,op,1);
 			fd_cf(0,1);
 		}
+		else if (strcmp(input, "rd") == 0 && cnt>1 && cnt<5) {
+			getPath(path,op,0);
+			offset=0;
+			if (cnt==2) {
+				oa=80;
+			}
+			if (cnt==3) {
+				oa=atoi(op+128);
+			}
+			if (cnt==4) {
+				offset=atoi(op+128);				
+				oa=atoi(op+256);				
+			}
+			while (oa) {
+				ob=fd_rd(path,tmp,offset,oa<1000?oa:1000);
+				if (ob<0) break;
+				oa-=ob;
+				offset+=ob;
+				tmp[ob]='\0';
+				printf("%s", tmp);
+			}
+			printf("\n");
+		}
+		else if (strcmp(input, "mv") == 0 && cnt == 3) {
+			getPath(path,op,3);
+			if (path->short_name[0]=='\0') continue;
+			getfPath(path,op+128,path->subdir);
+			if (path->FirstCluster==0&&path->short_name[0]=='\0'||!strcmp(tentry->short_name,".")||!strcmp(tentry->short_name,"..")) 
+			{
+				printf("Invalid path\n");
+				continue;
+			}
+			getPath(path,op,3);
+			if ((offset=cpENTRY(tmp,1))<0) continue;
+			getfPath(path,op+128,path->subdir);
+			changeName(tmp);
+			justWrite(tmp,path->FirstCluster);
+		}
 		else
 			do_usage();
+		
 	}	
 
 	return 0;
