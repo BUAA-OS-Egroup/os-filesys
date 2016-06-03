@@ -551,6 +551,8 @@ unsigned short GetFatCluster(unsigned short prev)
 	unsigned short next;
 	int index;
 
+	if (prev<2||prev!=0xffff) return 0xffff;
+
 	index = prev * 2;
 	next = RevByte(fatbuf[index],fatbuf[index+1]);
 
@@ -566,6 +568,8 @@ void ClearFatCluster(unsigned short cluster)
 {
 	int index;
 	index = cluster * 2;
+
+	if (cluster<2||cluster==0xffff) return;
 
 	fatbuf[index]=0x00;
 	fatbuf[index+1]=0x00;
@@ -979,9 +983,101 @@ int fd_cf(int size, int mode)
 	return -1;
 }
 
+int  rwrite(int clu1,int clu2, int mode) {
+	int tmp,n1,n2,k,ret,cluster_addr,offset;
+	char st[CLUSTER_SIZE];
+	unsigned char d[DIR_ENTRY_SIZE];
+	struct Entry entry;
+	n1=clu1;
+	n2=clu2;
+	if (n1==0xffff||n1<2) return;
+	if (n2==0xffff||n2<2) return;
+		while (1)
+		{
+			tmp=DATA_OFFSET + (n1-2) * CLUSTER_SIZE;
+			if(lseek(fd,tmp,SEEK_SET)<0)
+				perror("lseek cluWR failed");
+			if(read(fd,st,CLUSTER_SIZE)<0)
+				perror("read failed");
+			tmp=DATA_OFFSET + (n2-2) * CLUSTER_SIZE;
+			if(lseek(fd,tmp,SEEK_SET)<0)
+				perror("lseek cluWR failed");
+			if(write(fd,st,CLUSTER_SIZE)<0)
+				perror("write failed");
+
+		if (mode) {
+			cluster_addr = DATA_OFFSET + (n2-2) * CLUSTER_SIZE ;
+			if((ret = lseek(fd,cluster_addr,SEEK_SET))<0)
+				perror("lseek cluster_addr failed");
+
+			offset = cluster_addr;
+
+			/*只读一簇的内容*/
+			while(offset<cluster_addr +CLUSTER_SIZE)
+			{
+				ret = GetEntry(&entry);
+
+				offset += abs(ret);
+				//printf("%s %d %d\n", entry.short_name,entry.subdir,offset);
+				//getchar();
+				//getchar();
+
+				if(ret > 0 && strcmp(entry.short_name,".")!=0 && strcmp(entry.short_name,"..")!=0)
+				{
+					k=getEmptyCluster(1);
+					if (k<0) return -1;
+					tmp=entry.FirstCluster;
+					entry.FirstCluster=k;
+					if(lseek(fd,offset- DIR_ENTRY_SIZE ,SEEK_SET)<0)
+						perror("lseek cluWR failed");
+					if(read(fd,d,DIR_ENTRY_SIZE)<0)
+						perror("read failed");
+					d[26]=k&0xff;
+					d[27]=k>>8;
+					if(lseek(fd,offset- DIR_ENTRY_SIZE,SEEK_SET)<0)
+						perror("lseek cluWR failed");
+					if(write(fd,d,DIR_ENTRY_SIZE)<0)
+						perror("write failed");
+					rwrite(tmp,k,entry.subdir);					
+					if(lseek(fd,offset,SEEK_SET)<0)
+						perror("lseek cluWR failed");
+				}
+			}
+		}
+
+			n1=fatbuf[n1<<1]+(fatbuf[(n1<<1)+1]<<8);
+			if (n1==0xffff) {
+				if (fatbuf[n2<<1]+(fatbuf[(n2<<1)+1]<<8)!=0xffff) {
+					k=fatbuf[n2<<1]+(fatbuf[(n2<<1)+1]<<8);
+					fatbuf[n2<<1]=0xFF;
+					fatbuf[(n2<<1)+1]=0xff;
+					while (k>=2&&fatbuf[k<<1]+(fatbuf[(k<<1)+1]<<8)!=0) {
+						n2=fatbuf[k<<1]+(fatbuf[(k<<1)+1]<<8);
+						fatbuf[k<<1]=0;
+						fatbuf[(k<<1)+1]=0;
+						k=n2;
+						if (k==0xffff) break;
+					}
+				}
+				break;
+			} else {
+				k=fatbuf[n2<<1]+(fatbuf[(n2<<1)+1]<<8);
+				if (k<2||k==0xffff) {
+					k=getEmptyCluster(1);
+					if (k<0) return -1;
+					fatbuf[n2<<1]=k&0xff;
+					fatbuf[(n2<<1)+1]=k>>8;
+					if (WriteFat()<0) return -1;
+					n2=k;
+				}
+			}
+		}
+	if (WriteFat()<0) return -1;
+}
+
 int fd_ef(struct Entry * en, char * str, int mode, int len)
 {
-	unsigned int n,zero=0x00000000,cnt,k,i,tmp;
+	unsigned int n,zero=0x00000000,cnt,k,i,tmp,ltmp;
 	unsigned char c=0x00;
 	unsigned char *tmps;
 	if (en->FirstCluster==1||en->subdir==1||en->short_name[0]=='\0') 
@@ -1018,8 +1114,9 @@ int fd_ef(struct Entry * en, char * str, int mode, int len)
 				perror("lseek fd_ef failed");
 			if(write(fd,&zero,4)<0)
 				perror("write failed");
-			for (n=en->FirstCluster;fatbuf[n<<1]+(fatbuf[(n<<1)+1]<<8)!=0xffff;n=fatbuf[n<<1]+(fatbuf[(n<<1)+1]<<8))
+			for (n=en->FirstCluster;fatbuf[n<<1]+(fatbuf[(n<<1)+1]<<8)!=0xffff;n=ltmp)
 			{
+				ltmp=fatbuf[n<<1]+(fatbuf[(n<<1)+1]<<8);
 				fatbuf[n<<1]=0x00;
 				fatbuf[(n<<1)+1]=0x00;
 			}
@@ -1073,6 +1170,8 @@ int fd_ef(struct Entry * en, char * str, int mode, int len)
 			perror("lseek fd_ef failed");
 		if(write(fd,&en->size,4)<0)
 			perror("write failed");		
+		if(WriteFat()<0)
+			exit(1);
 	}
 	else if (mode==2)
 	{
@@ -1121,8 +1220,6 @@ int fd_ef(struct Entry * en, char * str, int mode, int len)
 		free(tmps);
 		printf("%d bytes are written.\n", i);
 	}
-	if(WriteFat()<0)
-		exit(1);
 	return 1;
 }
 
@@ -1139,7 +1236,7 @@ int fd_rd(struct Entry * en, unsigned char * str, int st, int len) {
 	while (st>=CLUSTER_SIZE) {
 		st-=CLUSTER_SIZE;
 		curClu=fatbuf[curClu<<1]+(fatbuf[(curClu<<1)+1]<<8);
-		if (curClu==0xffff) {
+		if (curClu==0xffff||curClu<2) {
 			printf("rd: invalid offset.\n");;
 			return -1;
 		}
@@ -1168,19 +1265,30 @@ int fd_rd(struct Entry * en, unsigned char * str, int st, int len) {
 				}
 
 			curClu=fatbuf[curClu<<1]+(fatbuf[(curClu<<1)+1]<<8);
-			if (curClu==0xffff) break;
+			if (curClu==0xffff||curClu<2) break;
 		}	
 	return i;
 }
 
-int cpENTRY(unsigned char * d, int mode) {
-	int size=tmpsize, addr=tmpaddr,k;
+int cpENTRY(unsigned char * d, int mode, int * id) {
+	int size=tmpsize, addr=tmpaddr,k, index;
 	unsigned char c=0xe5;
-	if(lseek(fd,tmpaddr,SEEK_SET)<0)
-		perror("lseek fd_df failed");
-	if (mode==0) return read(fd,d,tmpsize);
+	if(lseek(fd,tmpaddr+tmpsize- DIR_ENTRY_SIZE,SEEK_SET)<0)
+		perror("lseek fd_cp failed");
+	if (mode==0) {
+		k=read(fd,d,DIR_ENTRY_SIZE);
+		/*写第一簇的值*/
+		index=getEmptyCluster(1);
+		if (index<=0) return -1;
+		*id=index;
+		d[26] = (index &  0x00ff);
+		d[27] = ((index & 0xff00)>>8);
+
+		return k;
+
+	}
 	if (mode==1) {
-		k=read(fd,d,tmpsize);
+		k=read(fd,d,DIR_ENTRY_SIZE);
 		size+=addr;
 		for (;addr<size;addr+=DIR_ENTRY_SIZE)
 		{
@@ -1373,6 +1481,7 @@ int main()
 			offset=0;
 			if (cnt==2) {
 				oa=80;
+				if (path->size<80) oa=path->size;
 			}
 			if (cnt==3) {
 				oa=atoi(op+128);
@@ -1401,10 +1510,27 @@ int main()
 				continue;
 			}
 			getPath(path,op,3);
-			if ((offset=cpENTRY(tmp,1))<0) continue;
+			if ((offset=cpENTRY(tmp,1,&ob))<0) continue;
 			getfPath(path,op+128,path->subdir);
 			changeName(tmp);
 			justWrite(tmp,path->FirstCluster);
+		}
+		else if (strcmp(input, "cp") == 0 && cnt == 3) {
+			getPath(path,op,3);
+			if (path->short_name[0]=='\0') continue;
+			getfPath(path,op+128,path->subdir);
+			if (path->FirstCluster==0&&path->short_name[0]=='\0'||!strcmp(tentry->short_name,".")||!strcmp(tentry->short_name,"..")) 
+			{
+				printf("Invalid path\n");
+				continue;
+			}
+			getPath(path,op,3);
+			oa=path->FirstCluster;
+			if ((offset=cpENTRY(tmp,0,&ob))<0) continue;
+			getfPath(path,op+128,path->subdir);
+			changeName(tmp);
+			justWrite(tmp,path->FirstCluster);
+			rwrite(oa,ob,path->subdir);
 		}
 		else
 			do_usage();
